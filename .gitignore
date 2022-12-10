@@ -1,0 +1,4 @@
+out/
+.idea/
+target/
+dependency-reduced-pom.xml
