@@ -11,6 +11,8 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
 import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
+import org.apache.pdfbox.io.MemoryUsageSetting;
+import org.apache.pdfbox.multipdf.PDFMergerUtility;
 import org.im4java.core.ConvertCmd;
 import org.im4java.core.IM4JavaException;
 import org.im4java.core.IMOperation;
@@ -26,7 +28,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Predicate;
 
 public class MangaDownloader {
     static class MangaUrl {
@@ -39,7 +40,7 @@ public class MangaDownloader {
 
         @Override
         public String toString() {
-            return title + ";" + href;
+            return title + ";" + href.replace("https://chapmanganato.com/", "");
         }
     }
     public static void main(String[] args) {
@@ -88,7 +89,8 @@ public class MangaDownloader {
                 String outputName = fileParts[fileParts.length - 1].split("\\.")[0];
                 makeOut();
                 downloadAllChapterImages(new MangaUrl(outputName, url), startChapter, endChapter);
-                compileImagesIntoPDF(outputName, startChapter, endChapter, outputPath);
+                compileImagesIntoPDFs(outputName, startChapter, endChapter);
+                mergePDFs(outputName, startChapter, endChapter, outputPath);
                 cleanup(outputName);
                 break;
         }
@@ -118,7 +120,8 @@ public class MangaDownloader {
         downloadAllChapterImages(selectedManga, Integer.parseInt(chapters[0]), Integer.parseInt(chapters[1]));
         long time = System.currentTimeMillis();
         String outputPath = "./out/" + selectedManga.title + ".pdf";
-        compileImagesIntoPDF(selectedManga.title, Integer.parseInt(chapters[0]), Integer.parseInt(chapters[1]), outputPath);
+        compileImagesIntoPDFs(selectedManga.title, Integer.parseInt(chapters[0]), Integer.parseInt(chapters[1]));
+        mergePDFs(selectedManga.title, Integer.parseInt(chapters[0]), Integer.parseInt(chapters[1]), outputPath);
         System.out.println((System.currentTimeMillis() - time) + "ms");
         cleanup(selectedManga.title);
     }
@@ -142,27 +145,13 @@ public class MangaDownloader {
         return mangaUrls;
     }
 
-    private static void httpGet(String url) {
-      CloseableHttpClient httpClient = HttpClients.createDefault();
-      HttpGet httpGet = new HttpGet(url);
-      try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
-          System.out.println(response.getStatusLine());
-          HttpEntity entity = response.getEntity();
-          if (entity != null) {
-              String result = EntityUtils.toString(entity);
-              System.out.println(result);
-          }
-      } catch (IOException e) {
-          e.printStackTrace();
-      }
-    }
     private static Document getDocument(String url) {
       try {
           return Jsoup.connect(url).get();
       } catch (IOException e) {
           e.printStackTrace();
+          throw new RuntimeException(e);
       }
-      return null;
     }
 
     private static void downloadFile(CloseableHttpAsyncClient client, CountDownLatch successCounter, String url, String filePath, AtomicInteger downloadedCounter) {
@@ -184,6 +173,7 @@ public class MangaDownloader {
                     os.close();
                 } catch (IOException e) {
                     e.printStackTrace();
+                    throw new RuntimeException(e);
                 }
                 successCounter.countDown();
                 downloadedCounter.incrementAndGet();
@@ -193,7 +183,7 @@ public class MangaDownloader {
             public void failed(Exception e) {
                 e.printStackTrace();
                 // retry??
-                successCounter.countDown();
+                throw new RuntimeException(e);
             }
 
             @Override
@@ -230,6 +220,7 @@ public class MangaDownloader {
                     Thread.sleep(1000);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
+                    throw new RuntimeException(e);
                 }
             }
             System.out.println("\nDone downloading");
@@ -246,6 +237,7 @@ public class MangaDownloader {
             chapterCounter.await();
         } catch (InterruptedException e) {
             e.printStackTrace();
+            throw new RuntimeException(e);
         }
     }
 
@@ -270,15 +262,16 @@ public class MangaDownloader {
                 httpClient.close();
             } catch (InterruptedException | IOException e) {
                 e.printStackTrace();
+                throw new RuntimeException(e);
             }
         }
     }
 
-    private static void compileImagesIntoPDF(String title, int startChapter, int endChapter, String outputPath) {
-        ConvertCmd command = new ConvertCmd();
-        IMOperation op = new IMOperation();
+    private static void compileImagesIntoPDFs(String title, int startChapter, int endChapter) {
         String root = "./out/" + title;
         for (int i = startChapter; i <= endChapter; i++) {
+            ConvertCmd command = new ConvertCmd();
+            IMOperation op = new IMOperation();
             File[] images = new File(root + "/chapter-" + i).listFiles();
             if (images != null) {
                 Arrays.sort(images, Comparator.comparingInt(o -> Integer.parseInt(o.getName().split("\\.")[0])));
@@ -286,15 +279,34 @@ public class MangaDownloader {
                     op.addImage(image.getPath());
                 }
             }
+
+            op.addImage(root + "/chapter-" + i + ".pdf");
+            try {
+                command.run(op);
+            } catch (IOException | InterruptedException | IM4JavaException e) {
+                e.printStackTrace();
+                throw new RuntimeException(e);
+            }
         }
-        op.addImage(outputPath);
+    }
+
+    private static void mergePDFs(String outputName, int startChapter, int endChapter, String outputPath) {
+        String root = "./out/" + outputName;
+
+        PDFMergerUtility PDFMerger = new PDFMergerUtility();
+        PDFMerger.setDestinationFileName(outputPath);
+
+        for (int i = startChapter; i <= endChapter; i++) {
+            try {
+                PDFMerger.addSource(root + "/chapter-" + i + ".pdf");
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            }
+        }
+
         try {
-            command.run(op);
+            PDFMerger.mergeDocuments(MemoryUsageSetting.setupTempFileOnly());
         } catch (IOException e) {
-            e.printStackTrace();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        } catch (IM4JavaException e) {
             e.printStackTrace();
         }
     }
