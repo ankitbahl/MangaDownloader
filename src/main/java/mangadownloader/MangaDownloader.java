@@ -21,10 +21,13 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.FileImageInputStream;
+import javax.imageio.stream.ImageInputStream;
+import java.awt.*;
 import java.io.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
+import java.util.*;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -276,6 +279,14 @@ public class MangaDownloader {
             if (images != null) {
                 Arrays.sort(images, Comparator.comparingInt(o -> Integer.parseInt(o.getName().split("\\.")[0])));
                 for (File image : images) {
+                    try {
+                        Dimension imageDimension = getImageDimension(image);
+                        if (imageDimension.getWidth() > imageDimension.getHeight()) {
+                            rotateImage(image);
+                        }
+                    } catch (IOException | InterruptedException | IM4JavaException e) {
+                        e.printStackTrace();
+                    }
                     op.addImage(image.getPath());
                 }
             }
@@ -288,6 +299,46 @@ public class MangaDownloader {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    /**
+     * Gets image dimensions for given file
+     * @param imgFile image file
+     * @return dimensions of image
+     * @throws IOException if the file is not a known image
+     */
+    private static Dimension getImageDimension(File imgFile) throws IOException {
+        int pos = imgFile.getName().lastIndexOf(".");
+        if (pos == -1)
+            throw new IOException("No extension for file: " + imgFile.getAbsolutePath());
+        String suffix = imgFile.getName().substring(pos + 1);
+        Iterator<ImageReader> iter = ImageIO.getImageReadersBySuffix(suffix);
+        while(iter.hasNext()) {
+            ImageReader reader = iter.next();
+            try {
+                ImageInputStream stream = new FileImageInputStream(imgFile);
+                reader.setInput(stream);
+                int width = reader.getWidth(reader.getMinIndex());
+                int height = reader.getHeight(reader.getMinIndex());
+                return new Dimension(width, height);
+            } catch (IOException e) {
+                e.printStackTrace();
+                System.out.println("Error reading: " + imgFile.getAbsolutePath());
+            } finally {
+                reader.dispose();
+            }
+        }
+
+        throw new IOException("Not a known image file: " + imgFile.getAbsolutePath());
+    }
+
+    private static void rotateImage(File image) throws IOException, InterruptedException, IM4JavaException {
+        ConvertCmd cmd = new ConvertCmd();
+        IMOperation op = new IMOperation();
+        op.addImage(image.getPath());
+        op.rotate(90d);
+        op.addImage(image.getPath());
+        cmd.run(op);
     }
 
     private static void mergePDFs(String outputName, int startChapter, int endChapter, String outputPath) {
