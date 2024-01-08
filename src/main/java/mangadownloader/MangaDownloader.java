@@ -38,7 +38,7 @@ public class MangaDownloader {
         String href;
         MangaUrl(String title, String href) {
             this.title = title;
-            this.href = "https://chapmanganato.com/" + href;
+            this.href = "https://chapmanganelo.com/" + href;
         }
 
         @Override
@@ -131,7 +131,7 @@ public class MangaDownloader {
 
     private static List<MangaUrl> search(String searchTerm) {
         String escapedSearchTerm = searchTerm.replace(" ", "_");
-        Document doc = getDocument(String.format("https://manganelo.com/search/story/%s", escapedSearchTerm));
+        Document doc = getDocument(String.format("https://m.manganelo.com/search/story/%s", escapedSearchTerm));
         List<MangaUrl> mangaUrls= new ArrayList<>();
         if (doc != null) {
             Elements searchStoryItems = doc.select(".search-story-item");
